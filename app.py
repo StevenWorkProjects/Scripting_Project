@@ -48,7 +48,8 @@ def render_global_header():
             background-repeat: no-repeat !important;
 
             /* ⬇ move down ~50% of logo height */
-            background-position: right 20px calc(50% + 18px) !important;
+            background-position: 55% 55% !important;
+
 
             /* ⬇ make logo ~20% smaller */
             background-size: 160px auto !important;
