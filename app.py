@@ -57,7 +57,7 @@ def render_global_header():
 
         header[data-testid="stHeader"] > div,
         div[data-testid="stHeader"] > div {{
-            height: 76px !important;
+            height: 86px !important;
         }}
         </style>
         """,
