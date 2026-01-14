@@ -21,6 +21,12 @@ if "var_catalog" not in st.session_state or not isinstance(st.session_state.var_
 #Add logo
 #--------------------
 
+from pathlib import Path
+import base64
+import streamlit as st
+
+APP_DIR = Path(__file__).resolve().parent
+
 def render_global_header():
     logo_path = APP_DIR / "NPA.png"
     if not logo_path.exists():
@@ -52,7 +58,6 @@ def render_global_header():
         """,
         unsafe_allow_html=True
     )
-
 
 
 
