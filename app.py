@@ -26,8 +26,7 @@ APP_DIR = Path(__file__).resolve().parent
 APP_DIR = Path(__file__).resolve().parent
 
 def render_global_header():
-    logo_path = APP_DIR / "NPA.png"  # same folder as app.py
-
+    logo_path = APP_DIR / "NPA.png"
     if not logo_path.exists():
         st.error(f"Logo not found: {logo_path}")
         return
@@ -36,15 +35,27 @@ def render_global_header():
 
     st.markdown(
         f"""
-        <div style="
-            margin-top: -13.0rem;
-            margin-left: 80.2rem;
-        ">
-            <img src="data:image/png;base64,{b64}" style="width:280px; height:auto;" />
+        <style>
+        .npa-logo {{
+            position: fixed;
+            top: 16px;
+            right: 24px;
+            z-index: 1000;
+        }}
+        .npa-logo img {{
+            width: 320px !important;
+            height: auto !important;
+            max-width: none !important;
+        }}
+        </style>
+
+        <div class="npa-logo">
+            <img src="data:image/png;base64,{b64}" />
         </div>
         """,
         unsafe_allow_html=True
     )
+
 
 
 
