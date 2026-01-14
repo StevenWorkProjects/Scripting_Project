@@ -21,12 +21,6 @@ if "var_catalog" not in st.session_state or not isinstance(st.session_state.var_
 #Add logo
 #--------------------
 
-from pathlib import Path
-import base64
-import streamlit as st
-
-APP_DIR = Path(__file__).resolve().parent
-
 def render_global_header():
     logo_path = APP_DIR / "NPA.png"
     if not logo_path.exists():
@@ -38,23 +32,27 @@ def render_global_header():
     st.markdown(
         f"""
         <style>
-        /* Make Streamlit's top header a bit taller so the logo never clips */
+        /* Target both header forms used across Streamlit versions */
+        header[data-testid="stHeader"],
         div[data-testid="stHeader"] {{
-            height: 72px !important;
+            display: block !important;
+            visibility: visible !important;
+            height: 76px !important;                 /* gives room so it won't clip */
             background-image: url("data:image/png;base64,{b64}") !important;
             background-repeat: no-repeat !important;
             background-position: right 20px center !important;
-            background-size: 220px auto !important;  /* <-- adjust size here */
+            background-size: 200px auto !important;  /* <-- logo size */
         }}
 
-        /* Ensure inner header container matches height */
+        header[data-testid="stHeader"] > div,
         div[data-testid="stHeader"] > div {{
-            height: 72px !important;
+            height: 76px !important;
         }}
         </style>
         """,
         unsafe_allow_html=True
     )
+
 
 
 
