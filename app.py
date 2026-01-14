@@ -12,8 +12,6 @@ if "var_catalog" not in st.session_state or not isinstance(st.session_state.var_
     st.session_state.var_catalog = {}
 
 
-APP_DIR = Path(__file__).resolve().parent
-
 
 
 
@@ -22,6 +20,10 @@ APP_DIR = Path(__file__).resolve().parent
 #--------------------------
 #Add logo
 #--------------------
+
+from pathlib import Path
+import base64
+import streamlit as st
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -36,26 +38,24 @@ def render_global_header():
     st.markdown(
         f"""
         <style>
-        .npa-logo {{
-            position: fixed;
-            top: 16px;
-            right: 24px;
-            z-index: 9999;
-            pointer-events: none;
+        /* Make Streamlit's top header a bit taller so the logo never clips */
+        div[data-testid="stHeader"] {{
+            height: 72px !important;
+            background-image: url("data:image/png;base64,{b64}") !important;
+            background-repeat: no-repeat !important;
+            background-position: right 20px center !important;
+            background-size: 220px auto !important;  /* <-- adjust size here */
         }}
-        .npa-logo img {{
-            width: 280px !important;
-            height: auto !important;
-            max-width: none !important;
+
+        /* Ensure inner header container matches height */
+        div[data-testid="stHeader"] > div {{
+            height: 72px !important;
         }}
         </style>
-
-        <div class="npa-logo">
-            <img src="data:image/png;base64,{b64}" />
-        </div>
         """,
         unsafe_allow_html=True
     )
+
 
 
 
