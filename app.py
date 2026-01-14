@@ -52,7 +52,7 @@ def render_global_header():
 
 
             /* ⬇ make logo ~20% smaller */
-            background-size: 160px auto !important;
+            background-size: 140px auto !important;
         }}
 
         header[data-testid="stHeader"] > div,
