@@ -40,10 +40,11 @@ def render_global_header():
             position: fixed;
             top: 16px;
             right: 24px;
-            z-index: 1000;
+            z-index: 9999;
+            pointer-events: none;
         }}
         .npa-logo img {{
-            width: 320px !important;
+            width: 280px !important;
             height: auto !important;
             max-width: none !important;
         }}
@@ -55,6 +56,7 @@ def render_global_header():
         """,
         unsafe_allow_html=True
     )
+
 
 
 
