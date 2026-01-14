@@ -1,4 +1,9 @@
+rapidfuzz
 streamlit
 pandas
+numpy
 openpyxl
-rapidfuzz
+python-docx
+fuzzywuzzy
+python-Levenshtein
+
