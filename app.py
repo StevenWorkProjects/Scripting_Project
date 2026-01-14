@@ -38,16 +38,20 @@ def render_global_header():
     st.markdown(
         f"""
         <style>
-        /* Target both header forms used across Streamlit versions */
         header[data-testid="stHeader"],
         div[data-testid="stHeader"] {{
             display: block !important;
             visibility: visible !important;
-            height: 76px !important;                 /* gives room so it won't clip */
+            height: 76px !important;
+
             background-image: url("data:image/png;base64,{b64}") !important;
             background-repeat: no-repeat !important;
-            background-position: right 20px center !important;
-            background-size: 200px auto !important;  /* <-- logo size */
+
+            /* ⬇ move down ~50% of logo height */
+            background-position: right 20px calc(50% + 18px) !important;
+
+            /* ⬇ make logo ~20% smaller */
+            background-size: 160px auto !important;
         }}
 
         header[data-testid="stHeader"] > div,
@@ -58,6 +62,7 @@ def render_global_header():
         """,
         unsafe_allow_html=True
     )
+
 
 
 
