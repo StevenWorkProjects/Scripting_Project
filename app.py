@@ -40,7 +40,7 @@ def render_global_header():
             margin-top: -13.0rem;
             margin-left: 80.2rem;
         ">
-            <img src="data:image/png;base64,{b64}" style="width:160px; height:auto;" />
+            <img src="data:image/png;base64,{b64}" style="width:280px; height:auto;" />
         </div>
         """,
         unsafe_allow_html=True
