@@ -12,6 +12,8 @@ if "var_catalog" not in st.session_state or not isinstance(st.session_state.var_
     st.session_state.var_catalog = {}
 
 
+APP_DIR = Path(__file__).resolve().parent
+
 
 
 
@@ -21,14 +23,11 @@ if "var_catalog" not in st.session_state or not isinstance(st.session_state.var_
 #Add logo
 #--------------------
 
-from pathlib import Path
-import base64
-import streamlit as st
-
 APP_DIR = Path(__file__).resolve().parent
 
 def render_global_header():
-    logo_path = APP_DIR / "NPA.png"
+    logo_path = APP_DIR / "NPA.png"  # same folder as app.py
+
     if not logo_path.exists():
         st.error(f"Logo not found: {logo_path}")
         return
@@ -37,36 +36,15 @@ def render_global_header():
 
     st.markdown(
         f"""
-        <style>
-        header[data-testid="stHeader"],
-        div[data-testid="stHeader"] {{
-            display: block !important;
-            visibility: visible !important;
-            height: 76px !important;
-
-            background-image: url("data:image/png;base64,{b64}") !important;
-            background-repeat: no-repeat !important;
-
-            /* ⬇ move down ~50% of logo height */
-            background-position: 3% 10% !important;
-
-
-            /* ⬇ make logo ~20% smaller */
-            background-size: 140px auto !important;
-        }}
-
-        header[data-testid="stHeader"] > div,
-        div[data-testid="stHeader"] > div {{
-            height: 86px !important;
-        }}
-        </style>
+        <div style="
+            margin-top: -13.0rem;
+            margin-left: 80.2rem;
+        ">
+            <img src="data:image/png;base64,{b64}" style="width:160px; height:auto;" />
+        </div>
         """,
         unsafe_allow_html=True
     )
-
-
-
-
 
 
 
@@ -2022,6 +2000,49 @@ def _best_match(col: str, targets: list[str], threshold: float = 0.80):
     if best is not None and best_score >= threshold:
         return best, best_score
     return None, best_score
+
+
+# -------------------------
+# Module 7: column name resolving (fast)
+# -------------------------
+
+def _m7_resolve_name(name: str, resolve_map: dict | None) -> str:
+    '''Return the actual dataframe column for a displayed name.'''
+    if not resolve_map:
+        return name
+    return resolve_map.get(name, name)
+
+
+@st.cache_data(show_spinner=False)
+def _m7_build_resolve_map_cached(
+    base_cols: tuple,
+    canonical_vars: tuple,
+    threshold: float = 0.80,
+) -> tuple[dict, set]:
+    '''Build (resolve_map, matched_raw).
+
+    Cached so checkbox clicking does not redo fuzzy matching work.
+    base_cols: dataset columns (after dropping __text)
+    canonical_vars: var_catalog keys
+    '''
+    base_cols_list = [str(c) for c in base_cols]
+    canonical_list = [str(v) for v in canonical_vars]
+
+    resolve_map: dict[str, str] = {}
+    matched_raw: set[str] = set()
+
+    lower_to_col = {str(c).strip().lower(): str(c) for c in base_cols_list}
+
+    for v in sorted(canonical_list):
+        key = str(v).strip().lower()
+        match = lower_to_col.get(key)
+        if match is None:
+            match, _score = _best_match(str(v), base_cols_list, threshold=threshold)
+        if match is not None:
+            resolve_map[str(v)] = match
+            matched_raw.add(match)
+
+    return resolve_map, matched_raw
 
 def _get_series_safe(df: pd.DataFrame, colname: str) -> pd.Series:
     """
@@ -5395,6 +5416,167 @@ def _build_rows_plan(questions: list[dict], recodes: list[dict], ordered_vars: l
     return pd.DataFrame(rows, columns=["RowID", "VarOrder", "Var", "RowType", "Text", "Value", "Bold", "GroupCodes"])
 
 
+def _build_rows_plan_from_table(questions: list[dict], recodes: list[dict], order_df: pd.DataFrame) -> pd.DataFrame:
+    """Build a Module 6 render plan like Module 5 (SlotVar + optional InjectVar).
+
+    Key behavior (what you asked for):
+    - ONE question block per SlotVar (not separate blocks for the injected variable)
+    - Injected groups appear ABOVE the SlotVar choices
+    - Injected rows are emitted as RowType='choice_group' with GroupCodes so Module 6 can sum
+      underlying codes when filling weighted percents.
+    """
+    qmap = _questions_map(questions)
+
+    tmp = order_df.copy() if isinstance(order_df, pd.DataFrame) else pd.DataFrame(columns=["SlotVar", "InjectVar", "Order"])
+    for col in ["SlotVar", "InjectVar", "Order"]:
+        if col not in tmp.columns:
+            tmp[col] = INJECT_NONE if col == "InjectVar" else (10_000 if col == "Order" else "")
+
+    tmp["Order"] = pd.to_numeric(tmp["Order"], errors="coerce").fillna(10_000)
+    tmp["SlotVar"] = tmp["SlotVar"].apply(_safe_str)
+    tmp["InjectVar"] = tmp["InjectVar"].apply(_safe_str).replace({"": INJECT_NONE}).fillna(INJECT_NONE)
+    tmp = tmp[tmp["SlotVar"] != ""].copy()
+    tmp = tmp.sort_values(["Order", "SlotVar"], ascending=[True, True])
+
+    ordered_slots = tmp["SlotVar"].tolist()
+    qimage_pos = _first_qimage_index(ordered_slots)
+
+    # labels for the Images table (used later in doc build)
+    qimage_vars = [v for v in ordered_slots if str(v).upper().startswith("QIMAGE_")]
+    qimage_labels = []
+    for v in qimage_vars:
+        qd = qmap.get(v, {})
+        qimage_labels.append((_safe_str(qd.get("label")) or v))
+    st.session_state.m6_qimage_vars = qimage_vars
+    st.session_state.m6_qimage_labels = qimage_labels
+
+    inject_map = {_safe_str(r["SlotVar"]): _safe_str(r["InjectVar"]) for _, r in tmp.iterrows() if _safe_str(r.get("SlotVar"))}
+
+    # blocks to avoid trailing blank
+    blocks = []
+    if qimage_pos is not None:
+        blocks.append("__QIMAGE_TABLE__")
+    for slot in ordered_slots:
+        if slot.upper().startswith("QIMAGE_"):
+            continue
+        blocks.append(slot)
+
+    def _is_last_block(name: str) -> bool:
+        return bool(blocks) and blocks[-1] == name
+
+    rows = []
+    rid = 1
+    inserted_qimage = False
+
+    for si, slot in enumerate(ordered_slots):
+        slot = _safe_str(slot)
+        var_order = (si + 1) * 10
+
+        if (qimage_pos is not None) and (si == qimage_pos) and (not inserted_qimage):
+            rows.append({
+                "RowID": f"RID{rid:06d}", "VarOrder": var_order, "Var": "__QIMAGE_TABLE__",
+                "RowType": "qimage_header", "Text": "Images", "Value": "", "Bold": False, "GroupCodes": ""
+            }); rid += 1
+            rows.append({
+                "RowID": f"RID{rid:06d}", "VarOrder": var_order, "Var": "__QIMAGE_TABLE__",
+                "RowType": "qimage_placeholder", "Text": "[QIMAGE_TABLE_PLACEHOLDER]", "Value": "", "Bold": False, "GroupCodes": ""
+            }); rid += 1
+            if not _is_last_block("__QIMAGE_TABLE__"):
+                rows.append({
+                    "RowID": f"RID{rid:06d}", "VarOrder": var_order, "Var": "__QIMAGE_TABLE__",
+                    "RowType": "blank", "Text": "", "Value": "", "Bold": False, "GroupCodes": ""
+                }); rid += 1
+            inserted_qimage = True
+
+        if slot.upper().startswith("QIMAGE_"):
+            continue
+
+        label, prompt = _get_var_label_prompt(slot, qmap, recodes)
+        rows.append({
+            "RowID": f"RID{rid:06d}", "VarOrder": var_order, "Var": slot,
+            "RowType": "header", "Text": f"{slot}: {label}: {prompt}".strip(),
+            "Value": "", "Bold": False, "GroupCodes": ""
+        }); rid += 1
+
+        inject_var = _safe_str(inject_map.get(slot, INJECT_NONE))
+        injected_any = False
+
+        # Inject groups (bold) as choice_group with GroupCodes so Module 6 can sum
+        if inject_var and inject_var != INJECT_NONE:
+            rec = _find_recode_by_newq(recodes, inject_var)
+            if rec:
+                for g in rec.get("groups", []) or []:
+                    t = _safe_str(g.get("new_text"))
+                    new_code = _safe_str(g.get("new_code"))
+                    from_codes = []
+                    for f in g.get("from", []) or []:
+                        c = _safe_str(f.get("code"))
+                        if c:
+                            from_codes.append(c)
+                    if not t or not new_code or not from_codes:
+                        continue
+                    rows.append({
+                        "RowID": f"RID{rid:06d}", "VarOrder": var_order, "Var": slot,
+                        "RowType": "choice_group", "Text": t, "Value": new_code,
+                        "Bold": True, "GroupCodes": "|".join(from_codes)
+                    }); rid += 1
+                    injected_any = True
+
+        # Spacer row after injection block (keeps same question)
+        if injected_any:
+            rows.append({
+                "RowID": f"RID{rid:06d}", "VarOrder": var_order, "Var": slot,
+                "RowType": "spacer", "Text": "", "Value": "", "Bold": False, "GroupCodes": ""
+            }); rid += 1
+
+        # Normal choice rows (same source logic as Module 5)
+        choices = []
+        if slot in qmap:
+            choices = _choices_from_module1(qmap[slot])
+        else:
+            rec_slot = _find_recode_by_newq(recodes, slot)
+            if rec_slot:
+                choices = _choices_from_module2_recode(rec_slot, qmap)
+            else:
+                cat = st.session_state.get("var_catalog", {}) or {}
+                if slot in cat and isinstance(cat.get(slot), dict):
+                    ch = cat[slot].get("choices") or {}
+                    if isinstance(ch, dict) and ch:
+                        tmp2 = []
+                        for code, lab in ch.items():
+                            code_s = _safe_str(code)
+                            lab_s = _safe_str(lab)
+                            if code_s and lab_s and not _is_terminate_code(code_s):
+                                tmp2.append((lab_s, code_s))
+                        def _sort_key(pair):
+                            lab, code = pair
+                            ii = _safe_int(code)
+                            return (0, ii) if ii is not None else (1, code.lower(), lab.lower())
+                        choices = sorted(tmp2, key=_sort_key)
+
+        if choices:
+            for (opt, code) in choices:
+                rows.append({
+                    "RowID": f"RID{rid:06d}", "VarOrder": var_order, "Var": slot,
+                    "RowType": "choice", "Text": opt, "Value": code,
+                    "Bold": False, "GroupCodes": ""
+                }); rid += 1
+        else:
+            rows.append({
+                "RowID": f"RID{rid:06d}", "VarOrder": var_order, "Var": slot,
+                "RowType": "choice", "Text": "(no labels found)", "Value": "",
+                "Bold": False, "GroupCodes": ""
+            }); rid += 1
+
+        if not _is_last_block(slot):
+            rows.append({
+                "RowID": f"RID{rid:06d}", "VarOrder": var_order, "Var": slot,
+                "RowType": "blank", "Text": "", "Value": "", "Bold": False, "GroupCodes": ""
+            }); rid += 1
+
+    return pd.DataFrame(rows, columns=["RowID", "VarOrder", "Var", "RowType", "Text", "Value", "Bold", "GroupCodes"])
+
+
 # ----------------------------
 # Main render
 # ----------------------------
@@ -5547,6 +5729,12 @@ def render_module_6():
         # treat blanks as NaN-like
         s = s.replace({"nan": np.nan, "": np.nan, "None": np.nan})
         mask = s.notna()
+        # If we know the valid coded responses for this variable, treat anything
+        # outside that code list as "not asked / not in universe" for denominator.
+        choice_map = _choices_dict_for(var)
+        if choice_map:
+            valid = set(choice_map.keys())
+            mask = mask & s.isin(valid)
         if mask.sum() == 0:
             return 0.0, {}
         denom = float(w[mask].sum())
@@ -5586,10 +5774,12 @@ def render_module_6():
     for _, r in cur.iterrows():
         sv = _safe_str(r.get("SlotVar"))
         iv = _safe_str(r.get("InjectVar"))
-        if sv:
-            ordered_vars.append(sv)
+        # Prefer showing the injected/recoded table ABOVE the base variable table
+        # (e.g., QAGE2 should appear before QAGE when injected).
         if iv and iv != INJECT_NONE:
             ordered_vars.append(iv)
+        if sv:
+            ordered_vars.append(sv)
 
     # Remove duplicates but keep first occurrence
     seen = set()
@@ -5804,7 +5994,10 @@ def render_module_6():
         # Build a Word doc that matches Module 5 formatting EXACTLY,
         # but with "Count Percent" filled into the % cells (rounded).
         questions_for_plan = _augment_questions_for_planner(questions, var_catalog)
-        plan = _build_rows_plan(questions_for_plan, recodes, ordered_vars)
+        # IMPORTANT: Use the SlotVar/InjectVar table (like Module 5) so injected recodes
+        # appear within the same question block (totals first), instead of becoming a
+        # separate question (which was happening for QAGE2).
+        plan = _build_rows_plan_from_table(questions_for_plan, recodes, st.session_state.get("m6_table_df", pd.DataFrame()))
 
         # Precompute weighted dists for all vars we might need
         vars_needed = sorted({str(v).strip() for v in plan["Var"].unique() if str(v).strip() and not str(v).strip().startswith("__")})
@@ -6094,14 +6287,33 @@ def _pct(n: float, d: float) -> float:
     return n / d
 
 
-def _build_unweighted_counts(df: pd.DataFrame, col_groups: list[tuple[str, list]]) -> dict:
+def _build_unweighted_counts(df: pd.DataFrame, col_groups: list[tuple[str, list]], resolve_map: dict | None = None) -> dict:
     out = {}
     out[("Total", "Total")] = float(len(df))
     for demo_var, cats in col_groups:
-        s = df[demo_var]
+        s = _get_series_safe(df, _m7_resolve_name(demo_var, resolve_map))
         for c in cats:
             out[(demo_var, c)] = float((s == c).sum())
     return out
+
+def _build_counts(df: pd.DataFrame, col_groups: list[tuple[str, list]], weight_col: str | None, resolve_map: dict | None = None) -> dict:
+    """Counts for the header count row.
+
+    If weight_col is provided, returns weighted counts (sum of weights).
+    Otherwise, returns unweighted counts (n).
+    """
+    if weight_col is None:
+        return _build_unweighted_counts(df, col_groups, resolve_map=resolve_map)
+
+    w = pd.to_numeric(_get_series_safe(df, weight_col), errors="coerce").fillna(0.0)
+    out = {}
+    out[("Total", "Total")] = float(w.sum())
+    for demo_var, cats in col_groups:
+        s = _get_series_safe(df, _m7_resolve_name(demo_var, resolve_map))
+        for c in cats:
+            out[(demo_var, c)] = float(w[s == c].sum())
+    return out
+
 
 
 def _build_pcts_for_var(
@@ -6109,6 +6321,7 @@ def _build_pcts_for_var(
     var: str,
     col_groups: list[tuple[str, list]],
     weight_col: str | None,
+    resolve_map: dict | None = None,
 ) -> pd.DataFrame:
     """
     Returns DF:
@@ -6116,7 +6329,7 @@ def _build_pcts_for_var(
       columns = MultiIndex [("Total","Total"), (demo_var, demo_cat)...]
       values = column % (weighted or unweighted)
     """
-    s_var = df[var]
+    s_var = _get_series_safe(df, _m7_resolve_name(var, resolve_map))
     rcats = _ordered_categories(s_var)
 
     cols = [("Total", "Total")]
@@ -6133,14 +6346,14 @@ def _build_pcts_for_var(
             out.loc[r, ("Total", "Total")] = _pct((s_var == r).sum(), denom_total)
 
         for dv, cats in col_groups:
-            s_demo = df[dv]
+            s_demo = _get_series_safe(df, _m7_resolve_name(dv, resolve_map))
             for c in cats:
                 sub = df[s_demo == c]
                 denom = len(sub)
                 for r in rcats:
-                    out.loc[r, (dv, c)] = _pct((sub[var] == r).sum(), denom)
+                    out.loc[r, (dv, c)] = _pct((_get_series_safe(sub, _m7_resolve_name(var, resolve_map)) == r).sum(), denom)
     else:
-        w = pd.to_numeric(df[weight_col], errors="coerce").fillna(0.0)
+        w = pd.to_numeric(_get_series_safe(df, weight_col), errors="coerce").fillna(0.0)
         denom_total = _weighted_total(w)
         var_vals = s_var.values
 
@@ -6148,7 +6361,7 @@ def _build_pcts_for_var(
             out.loc[r, ("Total", "Total")] = _pct(_weighted_sum((var_vals == r), w), denom_total)
 
         for dv, cats in col_groups:
-            demo_vals = df[dv].values
+            demo_vals = _get_series_safe(df, _m7_resolve_name(dv, resolve_map)).values
             for c in cats:
                 mask_col = (demo_vals == c)
                 denom = _weighted_sum(mask_col, w)
@@ -6296,11 +6509,18 @@ def restore_standard_borders(ws):
             cell.border = border
 
 def shade_column_groups(ws):
+    """Alternate shading by column GROUPS, starting at Column C.
+
+    - Column A and B are label columns and should never be shaded.
+    - Column C (Total) is treated as the first group and should be shaded.
+    """
     header_row = 1
+
     col_groups = {}
     current_group = None
 
-    for col in range(1, ws.max_column + 1):
+    # Only consider numeric columns starting at C
+    for col in range(3, ws.max_column + 1):
         v = ws.cell(row=header_row, column=col).value
         if v not in [None, ""]:
             current_group = str(v).strip()
@@ -6309,10 +6529,12 @@ def shade_column_groups(ws):
 
     fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
     for i, cols in enumerate(col_groups.values()):
+        # First group (Total) is i=0 -> shaded
         if i % 2 == 0:
             for col in cols:
                 for row in range(1, ws.max_row + 1):
                     ws.cell(row=row, column=col).fill = fill
+
 
 def merge_and_center_total(ws):
     total_col = None
@@ -6514,7 +6736,22 @@ def render_module_7():
     # Available columns
     all_cols = df.columns.tolist()
 
+    # Hide helper/open-end columns and avoid duplicate fuzzy-matched columns
+    # - drop columns ending in '__text'
+    # - if a dataset column is a strong (>=80%) fuzzy match for a canonical var_catalog name,
+    #   we show the canonical name in the pickers and hide the raw column name
+    base_cols = [c for c in all_cols if not str(c).endswith('__text')]
 
+    var_catalog = st.session_state.get('var_catalog', {}) or {}
+    canonical_vars = [v for v in list(var_catalog.keys()) if v and not str(v).endswith('__text')]
+
+    # Cached resolve map so checkbox clicking doesn't redo fuzzy matching work.
+    resolve_map, matched_raw = _m7_build_resolve_map_cached(tuple(base_cols), tuple(sorted(canonical_vars)), threshold=0.80)
+
+    # Options shown in the checkbox boxes:
+    #   - canonical vars that exist in the dataset (via resolve_map)
+    #   - plus any remaining dataset columns not claimed by a canonical fuzzy match
+    m7_options = list(resolve_map.keys()) + [c for c in base_cols if c not in matched_raw]
     # Weight selector (include explicit no-weight)
     # Prefer Module 4's weight col when using Module 4 output
     default_weight = None
@@ -6542,7 +6779,7 @@ def render_module_7():
         st.markdown("### Columns (BY variables)")
         st.write("Click variables to check them. The order you check them becomes the left → right column order (Totals will be added automatically).")
         col_demo_vars = _ordered_checkbox_box(
-            options=all_cols,
+            options=m7_options,
             key="m7_cols_box",
         )
 
@@ -6550,7 +6787,7 @@ def render_module_7():
         st.markdown("### Rows (TABLE variables)")
         st.write("Click variables to check them. The order you check them becomes the top → bottom row order.")
         row_vars_raw = _ordered_checkbox_box(
-            options=all_cols,
+            options=m7_options,
             key="m7_rows_box",
         )
 
@@ -6564,11 +6801,9 @@ def render_module_7():
     overlap = set(row_vars_raw) & set(col_demo_vars)
     if overlap:
         st.info("Some variables are selected in both Columns and Rows. They will remain selected in both; exports will include them as selected.")
-    # Build column groups with category order
-    col_groups = []
-    for dv in col_demo_vars:
-        cats = _ordered_categories(df[dv])
-        col_groups.append((dv, cats))
+    # NOTE: Don't compute category lists (and other heavy work) on every checkbox click.
+    # We'll build col_groups only when Preview/Generate is pressed.
+    col_groups = None
 
     st.subheader("Export settings")
     title_text = st.text_input(
@@ -6588,10 +6823,11 @@ def render_module_7():
         if st.button("Preview first question", use_container_width=True, key="m7_preview"):
             if not qvars:
                 st.warning("Pick at least one question.")
-            elif not col_groups:
+            elif not col_demo_vars:
                 st.warning("Pick at least one column demo.")
             else:
-                p = _build_pcts_for_var(df, qvars[0], col_groups, weight_col)
+                col_groups = [(dv, _ordered_categories(_get_series_safe(df, _m7_resolve_name(dv, resolve_map)))) for dv in col_demo_vars]
+                p = _build_pcts_for_var(df, qvars[0], col_groups, weight_col, resolve_map=resolve_map)
                 st.write(f"Preview: {_var_label(qvars[0])}")
                 st.dataframe(p)
 
@@ -6600,9 +6836,12 @@ def render_module_7():
             if not qvars:
                 st.error("Select at least one question variable.")
                 return
-            if not col_groups:
+            if not col_demo_vars:
                 st.error("Select at least one column demo variable.")
                 return
+
+            # Heavy work begins here (only on Generate)
+            col_groups = [(dv, _ordered_categories(_get_series_safe(df, _m7_resolve_name(dv, resolve_map)))) for dv in col_demo_vars]
 
             wb = Workbook()
             ws = wb.active
@@ -6630,16 +6869,16 @@ def render_module_7():
                     ws.cell(row=1, column=col_cursor).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
                 col_cursor += len(cats)
 
-            # ---- Unweighted count row (Row 3) ----
-            counts = _build_unweighted_counts(df, col_groups)
-            ws.cell(row=3, column=1, value="Unweighted Count")
+            # ---- Count row (Row 3) ----
+            counts = _build_counts(df, col_groups, weight_col, resolve_map=resolve_map)
+            ws.cell(row=3, column=1, value=("Weighted Count" if weight_col is not None else "Unweighted Count"))
             ws.cell(row=3, column=2, value="")
-            ws.cell(row=3, column=3, value=counts[("Total", "Total")])
+            ws.cell(row=3, column=3, value=round(counts[("Total", "Total")], 0))
 
             cc = 4
             for demo_var, cats in col_groups:
                 for c in cats:
-                    ws.cell(row=3, column=cc, value=counts[(demo_var, c)])
+                    ws.cell(row=3, column=cc, value=round(counts[(demo_var, c)], 0))
                     cc += 1
 
             # ---- Write blocks starting Row 4 ----
@@ -6647,7 +6886,7 @@ def render_module_7():
 
             def write_block(varname: str, cur: int) -> int:
                 # Build % table for this row variable across all selected column groups
-                pct = _build_pcts_for_var(df, varname, col_groups, weight_col)
+                pct = _build_pcts_for_var(df, varname, col_groups, weight_col, resolve_map=resolve_map)
 
                 # No separate title row. We'll merge the row-group label into Column A across the category rows.
                 group_start = cur
@@ -6676,11 +6915,12 @@ def render_module_7():
                 # Total row: write COUNTS (denominators), not percents
                 ws.cell(row=cur, column=1, value="")
                 ws.cell(row=cur, column=2, value="Total")
-                ws.cell(row=cur, column=3, value=float(counts.get(("Total", "Total"), np.nan)))
+                ws.cell(row=cur, column=3, value=float(round(counts.get(("Total", "Total"), np.nan), 0)) if pd.notna(counts.get(("Total", "Total"), np.nan)) else np.nan)
                 cc3 = 4
                 for dv, cats2 in col_groups:
                     for cat2 in cats2:
-                        ws.cell(row=cur, column=cc3, value=float(counts.get((dv, cat2), np.nan)))
+                        val_ct = counts.get((dv, cat2), np.nan)
+                        ws.cell(row=cur, column=cc3, value=float(round(val_ct, 0)) if pd.notna(val_ct) else np.nan)
                         cc3 += 1
                 total_row = cur
                 cur += 1
