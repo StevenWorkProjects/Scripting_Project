@@ -23,11 +23,14 @@ APP_DIR = Path(__file__).resolve().parent
 #Add logo
 #--------------------
 
+from pathlib import Path
+import base64
+import streamlit as st
+
 APP_DIR = Path(__file__).resolve().parent
 
 def render_global_header():
-    logo_path = APP_DIR / "NPA.png"  # same folder as app.py
-
+    logo_path = APP_DIR / "NPA.png"
     if not logo_path.exists():
         st.error(f"Logo not found: {logo_path}")
         return
@@ -36,16 +39,33 @@ def render_global_header():
 
     st.markdown(
         f"""
-        <div style="
-            margin-top: -13.0rem;
-            margin-left: 80.2rem;
-        ">
-            <img src="data:image/png;base64,{b64}" style="width:160px; height:auto;" />
-        </div>
+        <style>
+        header[data-testid="stHeader"],
+        div[data-testid="stHeader"] {{
+            display: block !important;
+            visibility: visible !important;
+            height: 76px !important;
+
+            background-image: url("data:image/png;base64,{b64}") !important;
+            background-repeat: no-repeat !important;
+
+            /* ⬇ move down ~50% of logo height */
+            background-position: 3% 10% !important;
+
+
+            /* ⬇ make logo ~20% smaller */
+            background-size: 160px auto !important;
+            background-size: 140px auto !important;
+        }}
+
+        header[data-testid="stHeader"] > div,
+        div[data-testid="stHeader"] > div {{
+            height: 86px !important;
+        }}
+        </style>
         """,
         unsafe_allow_html=True
     )
-
 
 
 import re
