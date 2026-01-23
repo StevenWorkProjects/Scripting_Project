@@ -194,7 +194,7 @@ def generate_spss_from_module2(questions: list, recodes: list) -> str:
 # Page
 # ============================
 st.set_page_config(page_title="Question Builder", layout="wide")
-st.title("Question Builder ➜ Excel (SPSS Style)")
+st.title("Polling Script ➜ Toplines & Crosstabs")
 
 # ============================
 # Global session init
@@ -4479,7 +4479,7 @@ def _insert_qimage_table(doc: Document, image_labels: list[str]):
             col = GREEN if j == 1 else (ORANGE if j == 2 else None)
             _set_font_cell(row_cells[j], bold=bold, color=col)
             for para in row_cells[j].paragraphs:
-                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         if idx % 2 != 0:
             _shade_row(row_cells, "F2F2F2")
@@ -6093,7 +6093,7 @@ def render_module_6():
                     col = GREEN if j == 1 else (ORANGE if j == 2 else None)
                     _set_font_cell(row_cells[j], bold=bold, color=col)
                     for para in row_cells[j].paragraphs:
-                        para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
                 if idx % 2 != 0:
                     _shade_row(row_cells, "F2F2F2")
