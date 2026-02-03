@@ -357,7 +357,7 @@ _M1_Q_HEADER_RE = re.compile(r"^\s*(?:\d+\.\s*)?(Q[A-Z0-9_]+)\s*:\s*(.+?)\s*$")
 # QIMAGE_A-E: ...
 # QIMAGE_A - E: ...
 _M1_BATTERY_RE = re.compile(
-    r"^\s*(Q[A-Z0-9_]+)_([A-Z])\s*(?:-\s*([A-Z])|-\s*([A-Z])|-\s*([A-Z]))\s*:\s*(.+?)\s*$"
+    r"^\s*(Q[A-Z0-9_]+)_([A-Z]|\d+)\s*-\s*([A-Z]|\d+)\s*:\s*(.+?)\s*$"
 )
 
 # ----------------------------
@@ -487,18 +487,40 @@ def parse_script_rows_to_questions(rows):
             report["choices_added"] += len(current_q["choices"])
         current_q = None
 
-    def letter_in_range(letter, start, end):
-        if not (letter and start and end):
+    def _token_in_range(token: str, start: str, end: str) -> bool:
+        token = "" if token is None else str(token).strip()
+        start = "" if start is None else str(start).strip()
+        end   = "" if end is None else str(end).strip()
+        if not token or not start or not end:
             return False
-        return ord(start) <= ord(letter) <= ord(end)
+
+        # numeric range
+        if token.isdigit() and start.isdigit() and end.isdigit():
+            try:
+                t, s, e = int(token), int(start), int(end)
+                lo, hi = (s, e) if s <= e else (e, s)
+                return lo <= t <= hi
+            except Exception:
+                return False
+
+        # letter range
+        token_u, start_u, end_u = token.upper(), start.upper(), end.upper()
+        if (
+            len(token_u) == 1 and len(start_u) == 1 and len(end_u) == 1
+            and token_u.isalpha() and start_u.isalpha() and end_u.isalpha()
+        ):
+            lo, hi = (start_u, end_u) if start_u <= end_u else (end_u, start_u)
+            return ord(lo) <= ord(token_u) <= ord(hi)
+
+        return False
 
     def _parse_battery_groups(m_b):
         g = list(m_b.groups())
         prefix = g[0]
-        start = g[1]
-        end = g[2] or g[3] or g[4]
-        prompt = g[5]
-        return prefix, start, end, prompt
+        start_tok = g[1]
+        end_tok = g[2]
+        prompt = g[3]
+        return prefix, start_tok, end_tok, prompt
 
     for r in rows:
         text = "" if r.get("Text") is None else str(r.get("Text")).strip()
@@ -531,8 +553,8 @@ def parse_script_rows_to_questions(rows):
 
             if battery["active"] and qname.startswith(battery["prefix"] + "_"):
                 parts = qname.split("_")
-                letter = parts[-1] if parts else None
-                if letter and len(letter) == 1 and letter_in_range(letter, battery["start"], battery["end"]):
+                suffix = parts[-1] if parts else None
+                if suffix and _token_in_range(suffix, battery["start"], battery["end"]):
                     current_q = {
                         "qname": qname,
                         "prompt": prompt_clean,
@@ -3796,8 +3818,55 @@ def _is_reasonable_weight_var(df: pd.DataFrame, col: str) -> bool:
 # ----------------------------
 # Renderer
 # ----------------------------
+
+# =========================================================
+# MODULE 4: Weighting history helpers (undo last applied stage)
+# =========================================================
+import copy as _copy
+
+_M4_HISTORY_KEYS = [
+    "m4_dfw",
+    "m4_stage_idx",
+    "m4_stage_offset",
+    "m4_order_list",
+    "m4_order_selected",
+    "m4_weight_order",
+    "m4_spss_lines",
+    "m4_factors_by_var",
+    "m4_weighted_n_decimals",
+]
+
+def _m4_ensure_history():
+    if "m4_history" not in st.session_state or not isinstance(st.session_state.m4_history, list):
+        st.session_state.m4_history = []
+
+def _m4_snapshot():
+    snap = {}
+    for k in _M4_HISTORY_KEYS:
+        if hasattr(st.session_state, k):
+            snap[k] = _copy.deepcopy(getattr(st.session_state, k))
+    return snap
+
+def _m4_restore(snap: dict):
+    for k in _M4_HISTORY_KEYS:
+        if k in snap:
+            setattr(st.session_state, k, _copy.deepcopy(snap[k]))
+        else:
+            if hasattr(st.session_state, k):
+                delattr(st.session_state, k)
+
+def _m4_push_history():
+    _m4_ensure_history()
+    st.session_state.m4_history.append(_m4_snapshot())
+
 def render_module_4():
     st.header("Module 4: Weighting (enter factors manually)")
+
+    # ---- Undo history (stores snapshots after each applied weight stage) ----
+    _m4_ensure_history()
+    if len(st.session_state.m4_history) == 0:
+        _m4_push_history()  # baseline snapshot
+
 
     # Always use Module 3 dataset (df_out). Allow upload only if df_out missing.
     df3 = st.session_state.get("df_out", None)
@@ -3972,6 +4041,13 @@ def render_module_4():
             st.session_state.m4_stage_idx = min(len(st.session_state.m4_weight_order) - 1, st.session_state.m4_stage_idx + 1)
             st.rerun()
     with nav3:
+        can_undo = ("m4_history" in st.session_state and isinstance(st.session_state.m4_history, list) and len(st.session_state.m4_history) > 1)
+        if st.button("↩️ Delete previous weight", use_container_width=True, disabled=not can_undo):
+            # Drop current snapshot and restore the previous one
+            st.session_state.m4_history.pop()
+            _m4_restore(st.session_state.m4_history[-1])
+            st.success("Reverted to the previous weighting stage.")
+            st.rerun()
         st.write(f"Stage: **{st.session_state.m4_stage_idx + 1}** of **{len(st.session_state.m4_weight_order)}**")
     with nav4:
         done = (st.session_state.m4_stage_idx == len(st.session_state.m4_weight_order) - 1)
@@ -4034,6 +4110,10 @@ def render_module_4():
         else:
             global_stage = st.session_state.m4_stage_offset + (st.session_state.m4_stage_idx + 1)
             _apply_stage_manual(dfw, var, global_stage, edited)
+
+            # Snapshot the post-apply state so we can undo back to the prior stage
+            _m4_push_history()
+
             st.success("Applied weight. Toplines below reflect the new cumulative weight.")
             st.rerun()
 
