@@ -5874,12 +5874,11 @@ def render_module_6():
     for _, r in cur.iterrows():
         sv = _safe_str(r.get("SlotVar"))
         iv = _safe_str(r.get("InjectVar"))
-        # Prefer showing the injected/recoded table ABOVE the base variable table
-        # (e.g., QAGE2 should appear before QAGE when injected).
-        if iv and iv != INJECT_NONE:
-            ordered_vars.append(iv)
+        # List the injected variable AFTER the base variable (e.g., QAGE then cQAGE / QAGE2).
         if sv:
             ordered_vars.append(sv)
+        if iv and iv != INJECT_NONE:
+            ordered_vars.append(iv)
 
     # Remove duplicates but keep first occurrence
     seen = set()
