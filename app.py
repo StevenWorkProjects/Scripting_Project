@@ -5874,15 +5874,30 @@ def render_module_6():
     for _, r in cur.iterrows():
         sv = _safe_str(r.get("SlotVar"))
         iv = _safe_str(r.get("InjectVar"))
-        # List the injected variable AFTER the base variable (e.g., QAGE then cQAGE / QAGE2).
-        if sv:
-            ordered_vars.append(sv)
+        # Prefer showing the injected/recoded table ABOVE the base variable table
+        # (e.g., QAGE2 should appear before QAGE when injected).
         if iv and iv != INJECT_NONE:
             ordered_vars.append(iv)
+        if sv:
+            ordered_vars.append(sv)
+
+    # For SPSS syntax only, list base variable first, then the injected variable right after.
+    spss_vars = []
+    for _, r in cur.iterrows():
+        sv = _safe_str(r.get("SlotVar"))
+        iv = _safe_str(r.get("InjectVar"))
+        if sv:
+            spss_vars.append(sv)
+        if iv and iv != INJECT_NONE:
+            spss_vars.append(iv)
 
     # Remove duplicates but keep first occurrence
     seen = set()
     ordered_vars = [v for v in ordered_vars if not (v in seen or seen.add(v))]
+
+    # De-dupe SPSS-only variable order (keep first occurrence)
+    seen_spss = set()
+    spss_vars = [v for v in spss_vars if not (v in seen_spss or seen_spss.add(v))]
 
     if not ordered_vars:
         st.info("Add at least one variable in the table above, then Save + Preview.")
@@ -6069,7 +6084,7 @@ def render_module_6():
     with colA:
         build_docx = st.button("🧮 Build topline (.docx)", use_container_width=True, key="m6_build_docx_like_m5")
     with colB:
-        spss_txt = _m6_build_spss_freq_syntax(ordered_vars, weight_col)
+        spss_txt = _m6_build_spss_freq_syntax(spss_vars, weight_col)
         st.download_button(
             "⬇️ SPSS freq syntax (.sps)",
             data=spss_txt.encode("utf-8"),
