@@ -4493,7 +4493,8 @@ def _m5_add_option_row(table, text, placeholder="%", *, bold=False):
     row_cells[0].text = str(text)
     row_cells[1].text = str(placeholder)
     _set_font_cell(row_cells[0], bold=bold)
-    _set_font_cell(row_cells[1])
+    # If this is an injected (bold) row, bold the % cell too.
+    _set_font_cell(row_cells[1], bold=bold)
     for para in row_cells[1].paragraphs:
         para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _set_row_height(table.rows[-1])
@@ -5219,7 +5220,8 @@ def _m6_add_option_row(table, text, value_text, *, bold_left=False):
     row_cells[0].text = str(text)
     row_cells[1].text = str(value_text)
     _set_font_cell(row_cells[0], bold=bold_left)
-    _set_font_cell(row_cells[1], bold=False)
+    # If this is an injected (bold) row, bold the % cell too.
+    _set_font_cell(row_cells[1], bold=bold_left)
     for para in row_cells[1].paragraphs:
         # keep consistent with your earlier preference (feel free to change to RIGHT)
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
