@@ -1069,6 +1069,11 @@ if "m2_last_source_qname" not in st.session_state:
     st.session_state.m2_last_source_qname = None
 
 
+if "m2_preserve_groups_on_source_change" not in st.session_state:
+    # When True, changing source_qname will NOT wipe existing recode groups (useful for duplicating batteries).
+    st.session_state.m2_preserve_groups_on_source_change = False
+
+
 def _module2_get_from_catalog(varname: str):
     cat = st.session_state.get("var_catalog", {}) or {}
     varname = "" if varname is None else str(varname).strip()
@@ -1132,6 +1137,48 @@ def _module2_publish_recode_to_catalog(payload: dict):
 
 def _module2_remove_recode_from_catalog_if_m2(varname: str):
     _remove_from_var_catalog_if_origin(varname, origin="m2")
+
+
+
+def _module2_reconcile_work_groups_to_source(source_qname: str):
+    """When swapping the source variable, keep existing recode groups but:
+    - Update 'from' labels to match the new source's labels (by code)
+    - Drop any 'from' codes that don't exist in the new source
+    - Drop any groups that end up empty after filtering
+    """
+    src_q = _module2_find_source_question(source_qname)
+    src_choices_dict = (src_q.get("choices", {}) if src_q else {}) or {}
+    # normalize to dict[str,str]
+    if isinstance(src_choices_dict, list):
+        tmp = {}
+        for ch in src_choices_dict:
+            if isinstance(ch, dict):
+                c = str(ch.get("code", "")).strip()
+                l = str(ch.get("label", "")).strip()
+                if c:
+                    tmp[c] = l
+        src_choices_dict = tmp
+    else:
+        src_choices_dict = {str(k).strip(): str(v).strip() for k, v in (src_choices_dict or {}).items() if str(k).strip()}
+
+    new_groups = []
+    for g in (st.session_state.get("m2_work_groups") or []):
+        kept_from = []
+        for f in (g.get("from") or []):
+            c = str(f.get("code", "")).strip()
+            if not c:
+                continue
+            if c not in src_choices_dict:
+                continue
+            kept_from.append({"code": c, "label": src_choices_dict.get(c, "")})
+        if kept_from:
+            new_groups.append({
+                "new_text": g.get("new_text", ""),
+                "new_code": g.get("new_code", ""),
+                "from": kept_from,
+            })
+
+    st.session_state.m2_work_groups = new_groups
 
 
 def build_module2_export_df():
@@ -1269,7 +1316,9 @@ def render_module_2():
         cA, cB, cC = st.sidebar.columns(3)
 
         if cA.button("Duplicate", use_container_width=True, key="m2_dup"):
+            st.session_state.m2_preserve_groups_on_source_change = True
             dup = {
+
                 "source_qname": rec_selected.get("source_qname", ""),
                 "new_qname": rec_selected.get("new_qname", ""),
                 "new_label": rec_selected.get("new_label", ""),
@@ -1279,6 +1328,7 @@ def render_module_2():
             st.rerun()
 
         if cB.button("Edit", use_container_width=True, key="m2_edit"):
+            st.session_state.m2_preserve_groups_on_source_change = False
             _module2_load_into_ui(rec_selected, as_new=False)
             st.rerun()
 
@@ -1310,6 +1360,7 @@ def render_module_2():
 
     st.sidebar.divider()
     if st.sidebar.button("➕ New recode", use_container_width=True, key="m2_new"):
+        st.session_state.m2_preserve_groups_on_source_change = False
         st.session_state.m2_mode = "new"
         st.session_state.m2_selected_recode_index = None
         st.session_state.m2_last_sidebar_sel = None
@@ -1383,7 +1434,10 @@ def render_module_2():
             st.session_state.m2_defaults["new_label"] = str(src_q.get("label", "")).strip() if src_q else ""
 
         st.session_state.m2_pick = set()
-        st.session_state.m2_work_groups = []
+        if st.session_state.get("m2_preserve_groups_on_source_change", False):
+            _module2_reconcile_work_groups_to_source(source_qname)
+        else:
+            st.session_state.m2_work_groups = []
 
         st.session_state.m2_last_source_qname = source_qname
         st.session_state.m2_ui_version += 1
